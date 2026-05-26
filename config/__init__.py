@@ -1,0 +1,3 @@
+from .settings import MODEL_PATH, CONFIDENCE_THRESHOLD
+
+__all__ = ["MODEL_PATH", "CONFIDENCE_THRESHOLD"]
