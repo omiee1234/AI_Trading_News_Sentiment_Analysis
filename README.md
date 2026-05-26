@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 📈 AI Trading Sentiment Analyzer
 
 Analyzes financial market news with a fine-tuned HuggingFace classifier and returns a **BUY / SELL / HOLD** signal with confidence score.
@@ -99,3 +100,7 @@ streamlit run app.py
 ## Model Notes
 
 The app expects a HuggingFace `text-classification` model whose labels contain the strings **bullish**, **bearish**, or neither (mapped to HOLD).
+=======
+# AI_Trading_News_Sentiment_Analysis
+🚀 AI Resume Analyzer is an AI-powered web application that analyzes resumes for ATS compatibility, identifies missing skills and keywords, provides improvement suggestions, and generates optimized resumes for specific companies. Built using Python, Streamlit, OpenRouter API, NLP concepts, and PDF/DOCX processing.
+>>>>>>> 9870341976d04bd9df9d3e488a3574a74670bf05
