@@ -5,15 +5,21 @@ market analysis, trading signals, and confidence checks.
 No UI code lives here.
 """
 
-from models.sentiment_model import SentimentModel
-from config.settings import MODEL_PATH, CONFIDENCE_THRESHOLD
+import json
+from groq import Groq
+from config.settings import API, GROQ_MODEL, CONFIDENCE_THRESHOLD
 
 
 class SentimentController:
-    """Orchestrates the prediction pipeline and enriches the result."""
+    """Orchestrates the prediction pipeline with direct API calls."""
 
     def __init__(self):
-        self.model = SentimentModel.get_instance(MODEL_PATH)
+        if not API:
+            raise ValueError(
+                "API environment variable is not set. "
+                "Please set your Groq API key in the .env file."
+            )
+        self.client = Groq(api_key=API)
 
     # ------------------------------------------------------------------
     # Public API
@@ -32,20 +38,51 @@ class SentimentController:
         dict with keys:
             label, confidence, analysis, signal, low_confidence (bool)
         """
-        raw = self.model.predict(news)
+        # Call Groq API directly
+        prompt = f"""Analyze the sentiment of the following financial news text. 
+You must respond with ONLY a valid JSON object (no markdown, no extra text) in this exact format:
+{{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", "confidence": 0.0 to 1.0}}
 
-        label      = raw["label"]
-        confidence = round(raw["score"] * 100, 2)
+News text: "{news}"
 
-        analysis, signal = self._interpret(label)
+JSON response:"""
 
-        return {
-            "label":          label,
-            "confidence":     confidence,
-            "analysis":       analysis,
-            "signal":         signal,
-            "low_confidence": confidence < CONFIDENCE_THRESHOLD,
-        }
+        try:
+            completion = self.client.chat.completions.create(
+                model=GROQ_MODEL,
+                max_tokens=100,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+
+            response_text = completion.choices[0].message.content.strip()
+            result = json.loads(response_text)
+
+            label = result.get("sentiment", "NEUTRAL").upper()
+            confidence_score = float(result.get("confidence", 0.5))
+            confidence_score = max(0.0, min(1.0, confidence_score))
+            confidence = round(confidence_score * 100, 2)
+
+            analysis, signal = self._interpret(label)
+
+            return {
+                "label":          label,
+                "confidence":     confidence,
+                "analysis":       analysis,
+                "signal":         signal,
+                "low_confidence": confidence < CONFIDENCE_THRESHOLD,
+            }
+
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Failed to parse Groq response as JSON: {response_text}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Groq API call failed: {str(exc)}") from exc
 
     # ------------------------------------------------------------------
     # Private helpers

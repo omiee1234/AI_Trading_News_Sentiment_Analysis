@@ -4,27 +4,27 @@ Responsible for: Loading the ML model and raw inference only.
 No business logic, no UI, no signal generation here.
 """
 
-import os
-from transformers import pipeline
+import json
+from groq import Groq
+from config.settings import API, GROQ_MODEL
 
 
 class SentimentModel:
-    """Wraps the HuggingFace text-classification pipeline."""
+    """Wraps the Groq LLM for sentiment analysis."""
 
-    _instance = None  # singleton so model loads once
+    _instance = None  # singleton so client initializes once
 
-    def __init__(self, model_path: str = "./saved_model"):
-        self.model_path = model_path
-        self._classifier = None
+    def __init__(self):
+        self._client = None
 
     # ------------------------------------------------------------------
     # Singleton factory
     # ------------------------------------------------------------------
 
     @classmethod
-    def get_instance(cls, model_path: str = "./saved_model") -> "SentimentModel":
+    def get_instance(cls) -> "SentimentModel":
         if cls._instance is None:
-            cls._instance = cls(model_path)
+            cls._instance = cls()
             cls._instance._load()
         return cls._instance
 
@@ -33,23 +33,14 @@ class SentimentModel:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        if self.model_path == "./saved_model" and not os.path.exists(self.model_path):
-            raise FileNotFoundError(
-                f"Saved model directory not found: {self.model_path}.\n"
-                "Place your HuggingFace model in ./saved_model or set MODEL_PATH to a valid model path."
+        """Initialize Groq client."""
+        if not API:
+            raise ValueError(
+                "API environment variable is not set. "
+                "Please set your Groq API key to use this model."
             )
 
-        try:
-            self._classifier = pipeline(
-                "text-classification",
-                model=self.model_path,
-                tokenizer=self.model_path,
-            )
-        except OSError as exc:
-            raise RuntimeError(
-                f"Unable to load HuggingFace model from '{self.model_path}'. "
-                "Verify the path points to a valid local model directory or a HuggingFace repo ID."
-            ) from exc
+        self._client = Groq(api_key=API)
 
     # ------------------------------------------------------------------
     # Public API
@@ -57,17 +48,62 @@ class SentimentModel:
 
     def predict(self, text: str) -> dict:
         """
-        Returns raw model output.
+        Returns sentiment analysis using Groq LLM.
+
+        Parameters
+        ----------
+        text : str
+            The text to analyze for sentiment.
 
         Returns
         -------
         dict  {"label": str, "score": float}
+            label: "POSITIVE", "NEGATIVE", or "NEUTRAL"
+            score: confidence score between 0.0 and 1.0
         """
-        if self._classifier is None:
+        if self._client is None:
             raise RuntimeError("Model has not been loaded. Call _load() first.")
 
-        result = self._classifier(text)
-        return {
-            "label": result[0]["label"],
-            "score": result[0]["score"],
-        }
+        prompt = f"""Analyze the sentiment of the following financial news text. 
+You must respond with ONLY a valid JSON object (no markdown, no extra text) in this exact format:
+{{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", "confidence": 0.0 to 1.0}}
+
+News text: "{text}"
+
+JSON response:"""
+
+        try:
+            completion = self._client.chat.completions.create(
+                model=GROQ_MODEL,
+                max_tokens=100,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+
+            response_text = completion.choices[0].message.content.strip()
+
+            # Parse the JSON response
+            result = json.loads(response_text)
+
+            # Map sentiment labels to uppercase for consistency
+            sentiment = result.get("sentiment", "NEUTRAL").upper()
+            confidence = float(result.get("confidence", 0.5))
+
+            # Ensure confidence is within [0, 1]
+            confidence = max(0.0, min(1.0, confidence))
+
+            return {
+                "label": sentiment,
+                "score": confidence,
+            }
+
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Failed to parse Groq response as JSON: {response_text}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Groq API call failed: {str(exc)}") from exc
