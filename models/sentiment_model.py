@@ -46,64 +46,85 @@ class SentimentModel:
     # Public API
     # ------------------------------------------------------------------
 
-    def predict(self, text: str) -> dict:
-        """
-        Returns sentiment analysis using Groq LLM.
 
-        Parameters
-        ----------
-        text : str
-            The text to analyze for sentiment.
+def predict(self, text: str) -> dict:
+    """
+    Returns advanced financial sentiment analysis using Groq LLM.
+    """
 
-        Returns
-        -------
-        dict  {"label": str, "score": float}
-            label: "POSITIVE", "NEGATIVE", or "NEUTRAL"
-            score: confidence score between 0.0 and 1.0
-        """
-        if self._client is None:
-            raise RuntimeError("Model has not been loaded. Call _load() first.")
+    if self._client is None:
+        raise RuntimeError("Model has not been loaded. Call _load() first.")
 
-        prompt = f"""Analyze the sentiment of the following financial news text. 
-You must respond with ONLY a valid JSON object (no markdown, no extra text) in this exact format:
-{{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", "confidence": 0.0 to 1.0}}
+    prompt = f"""
+You are an expert AI financial trading analyst.
 
-News text: "{text}"
+Analyze the following financial news.
 
-JSON response:"""
+You MUST return ONLY valid JSON.
+Do not return markdown.
+Do not return explanations outside JSON.
 
-        try:
-            completion = self._client.chat.completions.create(
-                model=GROQ_MODEL,
-                max_tokens=100,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-            )
+JSON format:
+{{
+    "sentiment": "POSITIVE or NEGATIVE or NEUTRAL",
+    "confidence": 0.0,
+    "analysis": "Brief professional market analysis",
+    "signal": "BUY or SELL or HOLD"
+}}
 
-            response_text = completion.choices[0].message.content.strip()
+Rules:
+- Strong positive news = BUY
+- Strong negative news = SELL
+- Mixed or uncertain news = HOLD
+- Confidence must be between 0.0 and 1.0
 
-            # Parse the JSON response
-            result = json.loads(response_text)
+Financial News:
+"{text}"
 
-            # Map sentiment labels to uppercase for consistency
-            sentiment = result.get("sentiment", "NEUTRAL").upper()
-            confidence = float(result.get("confidence", 0.5))
+JSON Response:
+"""
 
-            # Ensure confidence is within [0, 1]
-            confidence = max(0.0, min(1.0, confidence))
+    try:
+        completion = self._client.chat.completions.create(
+            model=GROQ_MODEL,
+            max_tokens=300,
+            temperature=0.3,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+        )
 
-            return {
-                "label": sentiment,
-                "score": confidence,
-            }
+        response_text = completion.choices[0].message.content.strip()
 
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"Failed to parse Groq response as JSON: {response_text}"
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(f"Groq API call failed: {str(exc)}") from exc
+        # Parse JSON
+        result = json.loads(response_text)
+
+        sentiment = result.get("sentiment", "NEUTRAL").upper()
+        confidence = float(result.get("confidence", 0.5))
+        analysis = result.get(
+            "analysis",
+            "Market sentiment appears neutral."
+        )
+        signal = result.get("signal", "HOLD").upper()
+
+        # Clamp confidence
+        confidence = max(0.0, min(1.0, confidence))
+
+        return {
+            "label": sentiment,
+            "score": confidence,
+            "analysis": analysis,
+            "signal": signal,
+        }
+
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Failed to parse Groq response as JSON: {response_text}"
+        ) from exc
+
+    except Exception as exc:
+        raise RuntimeError(f"Groq API call failed: {str(exc)}") from exc
+
